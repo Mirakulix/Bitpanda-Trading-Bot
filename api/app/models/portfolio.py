@@ -1,7 +1,7 @@
 """
 Portfolio and position models for trading management
 """
-from sqlalchemy import Column, String, DECIMAL, TIMESTAMP, ForeignKey, UniqueConstraint, Text
+from sqlalchemy import Column, String, DECIMAL, TIMESTAMP, ForeignKey, UniqueConstraint, Text, Boolean
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
@@ -59,7 +59,7 @@ class Asset(Base):
     name = Column(String(100), nullable=False)
     asset_type = Column(String(20), nullable=False, index=True)  # crypto, stock, etf, commodity
     exchange = Column(String(50))  # binance, nasdaq, etc.
-    is_active = Column(String(10), default=True, index=True)
+    is_active = Column(Boolean, default=True, index=True)
     
     # Asset metadata
     sector = Column(String(50))
