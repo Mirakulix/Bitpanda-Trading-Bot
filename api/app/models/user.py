@@ -4,6 +4,7 @@ User model for authentication and profile management
 from sqlalchemy import Column, String, Boolean, DECIMAL, TIMESTAMP, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
+from sqlalchemy.orm import relationship
 import uuid
 
 from app.core.database import Base
@@ -39,6 +40,9 @@ class User(Base):
     # Austrian Tax Settings
     tax_residence = Column(String(2), default="AT")
     tax_id = Column(String(50))
+    
+    # Relationships
+    portfolios = relationship("Portfolio", back_populates="user", cascade="all, delete-orphan")
     
     def __repr__(self):
         return f"<User(id={self.id}, username={self.username})>"

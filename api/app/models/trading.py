@@ -1,7 +1,7 @@
 """
 Trading models for orders and execution
 """
-from sqlalchemy import Column, String, DECIMAL, TIMESTAMP, ForeignKey, Integer
+from sqlalchemy import Column, String, DECIMAL, TIMESTAMP, ForeignKey, Integer, Boolean
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
@@ -77,7 +77,7 @@ class RiskAlert(Base):
     threshold_value = Column(DECIMAL(15, 8))
     
     # Status
-    is_active = Column(String(10), default=True)
+    is_active = Column(Boolean, default=True)
     acknowledged_at = Column(TIMESTAMP(timezone=True))
     resolved_at = Column(TIMESTAMP(timezone=True))
     
