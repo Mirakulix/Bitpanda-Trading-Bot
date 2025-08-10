@@ -17,6 +17,7 @@ from app.models.user import User
 from app.models.portfolio import Asset
 from app.models.ai_analysis import AIAnalysis
 from app.routers.auth import get_current_active_user
+from app.services.ai_service import ai_service_manager
 
 logger = structlog.get_logger()
 
@@ -184,65 +185,25 @@ async def check_existing_analysis(
     
     return result.scalar_one_or_none()
 
-async def simulate_ai_analysis(
-    asset: Asset,
-    analysis_type: str,
-    ai_model: str
-) -> Dict[str, Any]:
-    """Simulate AI analysis (replace with real AI integration)"""
+async def get_market_data_for_analysis(asset: Asset, timeframe: str) -> Dict[str, Any]:
+    """Get market data for AI analysis"""
     
-    # Mock AI analysis results
-    import random
-    
-    recommendations = ["BUY", "SELL", "HOLD"]
-    confidence = round(random.uniform(0.6, 0.95), 4)
-    
-    if analysis_type == "technical":
-        reasoning = f"Technical analysis of {asset.symbol} shows strong momentum indicators with RSI at 65 and MACD crossing above signal line."
-        indicators = {
-            "rsi": round(random.uniform(20, 80), 2),
-            "macd": round(random.uniform(-1, 1), 4),
-            "sma_20": round(random.uniform(40000, 50000), 2),
-            "sma_50": round(random.uniform(35000, 45000), 2),
-            "support_level": round(random.uniform(42000, 44000), 2),
-            "resistance_level": round(random.uniform(46000, 48000), 2)
-        }
-    elif analysis_type == "fundamental":
-        reasoning = f"Fundamental analysis indicates {asset.symbol} is undervalued based on adoption metrics and network effects."
-        indicators = {
-            "market_cap_rank": random.randint(1, 100),
-            "network_value": round(random.uniform(1000000, 10000000), 0),
-            "adoption_score": round(random.uniform(70, 95), 1),
-            "dev_activity": round(random.uniform(60, 90), 1)
-        }
-    elif analysis_type == "sentiment":
-        reasoning = f"Social sentiment analysis shows positive sentiment for {asset.symbol} with increasing mentions and positive sentiment ratio."
-        indicators = {
-            "social_sentiment": round(random.uniform(-1, 1), 3),
-            "mention_volume": random.randint(1000, 10000),
-            "sentiment_trend": random.choice(["increasing", "decreasing", "stable"]),
-            "fear_greed_index": random.randint(20, 80)
-        }
-    else:  # consensus
-        reasoning = f"Multi-model consensus analysis suggests moderate {random.choice(['bullish', 'bearish', 'neutral'])} outlook for {asset.symbol}."
-        indicators = {
-            "consensus_score": round(random.uniform(0.6, 0.9), 3),
-            "model_agreement": round(random.uniform(0.7, 0.95), 3),
-            "prediction_strength": round(random.uniform(0.6, 0.85), 3)
-        }
-    
-    # Generate target price
-    current_price = Decimal("45000.00")  # Mock current price
-    target_multiplier = random.uniform(0.9, 1.1)
-    target_price = current_price * Decimal(str(target_multiplier))
-    
+    # Mock market data - in production this would fetch real data
     return {
-        "recommendation": random.choice(recommendations),
-        "confidence_score": Decimal(str(confidence)),
-        "target_price": target_price,
-        "reasoning": reasoning,
-        "indicators": indicators,
-        "expires_at": datetime.utcnow() + timedelta(hours=4)
+        "price": 45000.00,
+        "volume_24h": 2500000000,
+        "change_24h": 2.5,
+        "market_cap": 850000000000,
+        "ohlcv": [
+            {"open": 44800, "high": 45200, "low": 44600, "close": 45000, "volume": 125000},
+            {"open": 45000, "high": 45300, "low": 44900, "close": 45100, "volume": 135000}
+        ],
+        "indicators": {
+            "rsi": 65.3,
+            "macd": 0.0023,
+            "sma_20": 44850.0,
+            "sma_50": 43200.0
+        }
     }
 
 # ================================
@@ -283,8 +244,45 @@ async def analyze_assets(
                         analyses.append(analysis_response)
                         continue
                 
-                # Generate new analysis
-                ai_result = await simulate_ai_analysis(asset, analysis_type.value, ai_model.value)
+                # Get market data for analysis
+                market_data = await get_market_data_for_analysis(asset, request.timeframe)
+                
+                # Generate new analysis using real AI services
+                if analysis_type.value == "consensus":
+                    # Use consensus analysis for consensus type
+                    ai_result = await ai_service_manager.analyze_with_consensus(
+                        asset.symbol,
+                        request.timeframe,
+                        analysis_type.value,
+                        market_data,
+                        [ai_model.value.replace("-", "_")]  # Convert model name format
+                    )
+                else:
+                    # Use specific AI service
+                    service_name = ai_model.value.replace("-", "_")
+                    if service_name == "gpt_4":
+                        service_name = "azure_openai"
+                    elif service_name == "deepseek_r1":
+                        service_name = "deepseek"
+                    elif service_name in ["gemini", "mistral"]:
+                        service_name = "ollama"
+                    
+                    if service_name in ai_service_manager.services:
+                        ai_result = await ai_service_manager.services[service_name].analyze_market(
+                            asset.symbol,
+                            request.timeframe,
+                            analysis_type.value,
+                            market_data
+                        )
+                    else:
+                        # Fallback to consensus if service not found
+                        ai_result = await ai_service_manager.analyze_with_consensus(
+                            asset.symbol,
+                            request.timeframe,
+                            analysis_type.value,
+                            market_data,
+                            ["azure_openai", "deepseek", "ollama"]
+                        )
                 
                 # Create analysis record
                 db_analysis = AIAnalysis(
@@ -526,34 +524,58 @@ async def get_ai_models(
     current_user: Annotated[User, Depends(get_current_active_user)] = None,
     db: AsyncSession = Depends(get_db)
 ):
-    """Get available AI models and their statistics"""
+    """Get available AI models and their health status"""
+    
+    # Check health of all AI services
+    health_status = await ai_service_manager.health_check_all()
     
     return [
         {
             "model": "gpt-4",
             "provider": "Azure OpenAI",
-            "status": "active",
+            "status": "active" if health_status.get("azure_openai", False) else "unavailable",
             "accuracy_score": 0.78,
             "avg_confidence": 0.82,
             "total_analyses": 1250,
-            "specialties": ["fundamental", "consensus"]
+            "specialties": ["fundamental", "consensus"],
+            "endpoint_configured": bool(settings.AZURE_OPENAI_API_KEY and settings.AZURE_OPENAI_ENDPOINT)
         },
         {
             "model": "deepseek-r1",
             "provider": "DeepSeek",
-            "status": "active",
+            "status": "active" if health_status.get("deepseek", False) else "unavailable",
             "accuracy_score": 0.75,
             "avg_confidence": 0.79,
             "total_analyses": 980,
-            "specialties": ["technical", "sentiment"]
+            "specialties": ["technical", "sentiment"],
+            "endpoint_configured": bool(settings.DEEPSEEK_API_KEY)
         },
         {
             "model": "gemini",
             "provider": "Ollama",
-            "status": "active",
+            "status": "active" if health_status.get("ollama", False) else "unavailable",
             "accuracy_score": 0.71,
             "avg_confidence": 0.76,
             "total_analyses": 650,
-            "specialties": ["sentiment", "fundamental"]
+            "specialties": ["sentiment", "fundamental"],
+            "endpoint_configured": True  # Ollama endpoint is always configured
         }
     ]
+
+@router.get("/health", response_model=Dict[str, Any])
+async def get_ai_services_health(
+    current_user: Annotated[User, Depends(get_current_active_user)] = None
+):
+    """Get health status of all AI services"""
+    
+    health_status = await ai_service_manager.health_check_all()
+    
+    return {
+        "overall_status": "healthy" if any(health_status.values()) else "unhealthy",
+        "services": health_status,
+        "available_services": [k for k, v in health_status.items() if v],
+        "unavailable_services": [k for k, v in health_status.items() if not v],
+        "total_services": len(health_status),
+        "healthy_services": sum(health_status.values()),
+        "checked_at": datetime.utcnow().isoformat()
+    }
